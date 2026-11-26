@@ -21,6 +21,12 @@ data class RecentUnknownCaller(
     val callType: Int
 )
 
+data class DeviceContactEntry(
+    val displayName: String,
+    val rawNumber: String,
+    val matchKey: String
+)
+
 object DeviceContactsAndCallLogHelper {
 
     fun extractContactFromPickerUri(context: Context, contactUri: Uri): PickedContactResult? {
@@ -177,6 +183,32 @@ object DeviceContactsAndCallLogHelper {
             return emptyList()
         }
 
+        return results
+    }
+
+    fun loadAllDeviceContacts(context: Context): List<DeviceContactEntry> {
+        if (!hasPermission(context, Manifest.permission.READ_CONTACTS)) return emptyList()
+        val seenKeys = HashSet<String>()
+        val results = mutableListOf<DeviceContactEntry>()
+        try {
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                null, null,
+                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY} COLLATE NOCASE ASC"
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val name = PhoneNormalizer.cleanText(cursor.getString(0).orEmpty()).ifBlank { "Unnamed Contact" }
+                    val number = cursor.getString(1)?.trim().orEmpty()
+                    if (number.isBlank()) continue
+                    val matchKey = PhoneNormalizer.toMatchKey(number)
+                    if (matchKey.length < 7 || !seenKeys.add(matchKey)) continue
+                    results.add(DeviceContactEntry(displayName = name, rawNumber = number, matchKey = matchKey))
+                }
+            }
+        } catch (_: SecurityException) {
+            return emptyList()
+        }
         return results
     }
 

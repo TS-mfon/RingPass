@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -41,6 +42,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ringpass.app.ui.components.MultiNumberContactDialog
+import com.ringpass.app.ui.components.BulkImportContactsDialog
 import com.ringpass.app.ui.screens.NotedNumbersScreen
 import com.ringpass.app.ui.screens.SetupScreen
 import com.ringpass.app.ui.screens.WhitelistedContactsScreen
@@ -50,6 +52,14 @@ private enum class RingPassTab(val label: String) {
     CONTACTS("Contacts"),
     NOTED("Noted Numbers"),
     SETUP("Setup")
+    bulkImportContacts?.let { deviceContacts ->
+        BulkImportContactsDialog(
+            deviceContacts = deviceContacts,
+            existingMatchKeys = allMatchKeys,
+            onDismiss = viewModel::dismissBulkImport,
+            onConfirm = viewModel::confirmBulkImport
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,10 +70,17 @@ fun RingPassApp(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+    var pendingContactsActionCode by rememberSaveable { mutableIntStateOf(0) }
+    var ringtoneTargetRuleId by rememberSaveable { mutableLongStateOf(-1L) }
 
     val contacts by viewModel.filteredContacts.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val notedNumbers by viewModel.notedNumbers.collectAsStateWithLifecycle()
+    val allMatchKeys by viewModel.allMatchKeys.collectAsStateWithLifecycle()
+    val bulkImportContacts by viewModel.bulkImportContacts.collectAsStateWithLifecycle()
+    val globalRingtoneName by viewModel.globalRingtoneName.collectAsStateWithLifecycle()
+    val listenerConnected by viewModel.listenerConnected.collectAsStateWithLifecycle()
+    val listenerLogs by viewModel.listenerLogs.collectAsStateWithLifecycle()
     val recentUnknownCallers by viewModel.recentUnknownCallers.collectAsStateWithLifecycle()
     val permissions by viewModel.permissions.collectAsStateWithLifecycle()
     val pendingMultiNumber by viewModel.pendingMultiNumberContact.collectAsStateWithLifecycle()
@@ -88,12 +105,26 @@ fun RingPassApp(
         }
     }
 
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val targetId = ringtoneTargetRuleId
+        ringtoneTargetRuleId = -1L
+        if (uri != null) {
+            if (targetId <= 0L) viewModel.setGlobalRingtone(uri)
+            else viewModel.setRuleRingtone(targetId, uri)
+        }
+    }
+
     val contactsPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         viewModel.refreshPermissions()
+        val action = pendingContactsActionCode
+        pendingContactsActionCode = 0
         if (granted) {
-            pickContactLauncher.launch(null)
+            if (action == 1) pickContactLauncher.launch(null)
+            else if (action == 2) viewModel.openBulkImportContacts()
         }
     }
 
@@ -152,21 +183,35 @@ fun RingPassApp(
     ) { innerPadding ->
         when (RingPassTab.entries[selectedTabIndex]) {
             RingPassTab.CONTACTS -> {
+                val runContactsAction: (Int) -> Unit = { action ->
+                    val hasContacts = ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.READ_CONTACTS
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (hasContacts) {
+                        if (action == 1) pickContactLauncher.launch(null)
+                        else if (action == 2) viewModel.openBulkImportContacts()
+                    } else {
+                        pendingContactsActionCode = action
+                        contactsPermLauncher.launch(Manifest.permission.READ_CONTACTS)
+                    }
+                }
                 WhitelistedContactsScreen(
                     contacts = contacts,
                     searchQuery = searchQuery,
+                    globalRingtoneName = globalRingtoneName,
                     onSearchChange = viewModel::updateSearchQuery,
-                    onPickContactClick = {
-                        val hasContacts = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.READ_CONTACTS
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (hasContacts) {
-                            pickContactLauncher.launch(null)
-                        } else {
-                            contactsPermLauncher.launch(Manifest.permission.READ_CONTACTS)
-                        }
+                    onPickContactClick = { runContactsAction(1) },
+                    onBulkImportClick = { runContactsAction(2) },
+                    onPickGlobalRingtone = {
+                        ringtoneTargetRuleId = -1L
+                        audioPickerLauncher.launch(arrayOf("audio/*"))
                     },
+                    onClearGlobalRingtone = { viewModel.setGlobalRingtone(null) },
+                    onPickRuleRingtone = { rule ->
+                        ringtoneTargetRuleId = rule.id
+                        audioPickerLauncher.launch(arrayOf("audio/*"))
+                    },
+                    onClearRuleRingtone = { rule -> viewModel.setRuleRingtone(rule.id, null) },
                     onToggleCalls = viewModel::toggleAllowCalls,
                     onToggleMessages = viewModel::toggleAllowMessages,
                     onDeleteRule = viewModel::deleteRule,
@@ -179,10 +224,13 @@ fun RingPassApp(
                     recentUnknownCallers = recentUnknownCallers,
                     notedNumbers = notedNumbers,
                     callLogGranted = permissions.callLogGranted,
+                    globalRingtoneName = globalRingtoneName,
                     onRequestCallLogPermission = requestAllRuntimePermissions,
                     onRefreshCallLog = { viewModel.refreshRecentUnknownCallers() },
                     onSaveNote = viewModel::saveNotedNumber,
                     onUpdateNote = viewModel::updateExistingNote,
+                    onPickRuleRingtone = { rule -> ringtoneTargetRuleId = rule.id; audioPickerLauncher.launch(arrayOf("audio/*")) },
+                    onClearRuleRingtone = { rule -> viewModel.setRuleRingtone(rule.id, null) },
                     onToggleCalls = viewModel::toggleAllowCalls,
                     onToggleMessages = viewModel::toggleAllowMessages,
                     onDeleteRule = viewModel::deleteRule,
@@ -193,6 +241,9 @@ fun RingPassApp(
             RingPassTab.SETUP -> {
                 SetupScreen(
                     status = permissions,
+                    listenerConnected = listenerConnected,
+                    listenerLogs = listenerLogs,
+                    globalRingtoneName = globalRingtoneName,
                     onOpenDndSettings = {
                         context.startActivity(
                             Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
@@ -230,6 +281,10 @@ fun RingPassApp(
                         )
                         context.startActivity(intent)
                     },
+                    onRebindListener = { viewModel.rebindNotificationListener(silent = false) },
+                    onTestBypassSound = viewModel::testBypassSound,
+                    onPickGlobalRingtone = { ringtoneTargetRuleId = -1L; audioPickerLauncher.launch(arrayOf("audio/*")) },
+                    onClearGlobalRingtone = { viewModel.setGlobalRingtone(null) },
                     onOpenAppDetailsSettings = {
                         context.startActivity(
                             Intent(

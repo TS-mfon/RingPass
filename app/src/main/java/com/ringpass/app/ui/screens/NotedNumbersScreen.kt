@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Message
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -32,7 +33,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,10 +55,13 @@ fun NotedNumbersScreen(
     recentUnknownCallers: List<RecentUnknownCaller>,
     notedNumbers: List<TrustedRule>,
     callLogGranted: Boolean,
+    globalRingtoneName: String?,
     onRequestCallLogPermission: () -> Unit,
     onRefreshCallLog: () -> Unit,
     onSaveNote: (number: String, note: String) -> Unit,
     onUpdateNote: (id: Long, note: String) -> Unit,
+    onPickRuleRingtone: (TrustedRule) -> Unit,
+    onClearRuleRingtone: (TrustedRule) -> Unit,
     onToggleCalls: (TrustedRule, Boolean) -> Unit,
     onToggleMessages: (TrustedRule, Boolean) -> Unit,
     onDeleteRule: (TrustedRule) -> Unit,
@@ -196,6 +203,9 @@ fun NotedNumbersScreen(
                 NotedRuleCard(
                     rule = rule,
                     onEditNote = { editingRule = rule },
+                    hasGlobalRingtone = globalRingtoneName != null,
+                    onPickRingtone = { onPickRuleRingtone(rule) },
+                    onClearRingtone = { onClearRuleRingtone(rule) },
                     onToggleCalls = { onToggleCalls(rule, it) },
                     onToggleMessages = { onToggleMessages(rule, it) },
                     onDelete = { onDeleteRule(rule) }
@@ -292,7 +302,10 @@ private fun RecentCallerRow(
 @Composable
 private fun NotedRuleCard(
     rule: TrustedRule,
+    hasGlobalRingtone: Boolean,
     onEditNote: () -> Unit,
+    onPickRingtone: () -> Unit,
+    onClearRingtone: () -> Unit,
     onToggleCalls: (Boolean) -> Unit,
     onToggleMessages: (Boolean) -> Unit,
     onDelete: () -> Unit
@@ -361,6 +374,25 @@ private fun NotedRuleCard(
                 }
             }
 
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                InputChip(
+                    selected = rule.customRingtoneUri != null,
+                    onClick = onPickRingtone,
+                    leadingIcon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
+                    label = {
+                        Text(
+                            text = rule.customRingtoneName
+                                ?: if (hasGlobalRingtone) "Ringtone: Global MP3" else "Set MP3 Ringtone",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                )
+                if (rule.customRingtoneUri != null) {
+                    TextButton(onClick = onClearRingtone) { Text("Reset") }
+                }
+            }
             Spacer(modifier = Modifier.height(10.dp))
 
             Row(

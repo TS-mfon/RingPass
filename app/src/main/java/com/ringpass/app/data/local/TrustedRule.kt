@@ -19,5 +19,7 @@ data class TrustedRule(
     val allowCalls: Boolean = true,
     val allowMessages: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
-    val lastTriggeredAt: Long? = null
+    val lastTriggeredAt: Long? = null,
+    val customRingtoneUri: String? = null,
+    val customRingtoneName: String? = null
 )

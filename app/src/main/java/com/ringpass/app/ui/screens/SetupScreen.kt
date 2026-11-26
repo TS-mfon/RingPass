@@ -19,6 +19,9 @@ import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DoNotDisturbOn
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -26,18 +29,23 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ringpass.app.ui.viewmodel.PermissionStatusState
 
 @Composable
 fun SetupScreen(
     status: PermissionStatusState,
+    listenerConnected: Boolean,
+    listenerLogs: List<String>,
+    globalRingtoneName: String?,
     onOpenDndSettings: () -> Unit,
     onRequestCallScreeningRole: () -> Unit,
     onOpenNotificationListenerSettings: () -> Unit,
@@ -45,6 +53,10 @@ fun SetupScreen(
     onRequestRuntimePermissions: () -> Unit,
     onRequestBatteryOptimizationExemption: () -> Unit,
     onOpenAppDetailsSettings: () -> Unit,
+    onRebindListener: () -> Unit,
+    onTestBypassSound: () -> Unit,
+    onPickGlobalRingtone: () -> Unit,
+    onClearGlobalRingtone: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -103,6 +115,77 @@ fun SetupScreen(
             }
         }
 
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Global Custom Ringtone (All Contacts)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (globalRingtoneName != null) "Active MP3/Audio: $globalRingtoneName" else "Using phone's default ringtone (tap below to pick an MP3/audio file for all callers).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = onPickGlobalRingtone) { Text(if (globalRingtoneName != null) "Change MP3" else "Pick MP3 / Audio") }
+                        if (globalRingtoneName != null) TextButton(onClick = onClearGlobalRingtone) { Text("Reset") }
+                    }
+                }
+            }
+        }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.NotificationsActive, contentDescription = null, tint = if (listenerConnected) Color(0xFF5EEAD4) else Color(0xFFFCD34D))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (listenerConnected) "WhatsApp / Message Listener: CONNECTED" else "WhatsApp / Message Listener: NOT BOUND",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (listenerConnected) Color(0xFF5EEAD4) else Color(0xFFFCD34D)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Alarm Volume: ${status.alarmVolumePercent}% (must be > 0% for WhatsApp & MP3 audio under DND).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (status.alarmVolumePercent == 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (!listenerConnected) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Sideloaded APK tip: If Notification Access is greyed out or not bound, tap Open RingPass App Info -> top-right 3 dots -> Allow restricted settings, then re-enable Notification Listener Access.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(onClick = onTestBypassSound) {
+                            Icon(Icons.Rounded.VolumeUp, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Test Sound")
+                        }
+                        if (status.notificationListenerGranted && !listenerConnected) {
+                            FilledTonalButton(onClick = onRebindListener) { Text("Rebind Listener") }
+                        }
+                    }
+                    if (listenerLogs.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("Recent Listener Activity", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        listenerLogs.take(5).forEach { entry ->
+                            Text(entry, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
         item {
             SetupPermissionCard(
                 title = "1. Do Not Disturb Access",

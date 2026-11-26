@@ -7,6 +7,7 @@ import android.telephony.TelephonyManager
 import com.ringpass.app.RingPassApplication
 import com.ringpass.app.data.contacts.DeviceContactsAndCallLogHelper
 import com.ringpass.app.service.NoteOverlayService
+import com.ringpass.app.service.CustomRingtonePlayer
 import com.ringpass.app.util.NotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,10 @@ class CallEndReceiver : BroadcastReceiver() {
 
         prefs.edit().putString(KEY_LAST_STATE, newState).apply()
 
+        if (newState == TelephonyManager.EXTRA_STATE_OFFHOOK) {
+            CustomRingtonePlayer.stop("sim_call")
+        }
+
         val callJustEnded = newState == TelephonyManager.EXTRA_STATE_IDLE &&
             (previousState == TelephonyManager.EXTRA_STATE_RINGING ||
                 previousState == TelephonyManager.EXTRA_STATE_OFFHOOK)
@@ -37,6 +42,7 @@ class CallEndReceiver : BroadcastReceiver() {
         if (!callJustEnded) return
 
         val app = context.applicationContext as? RingPassApplication ?: return
+        CustomRingtonePlayer.stop("sim_call")
         app.dndController.restoreDndIfNeeded()
         NoteOverlayService.dismiss(app)
 

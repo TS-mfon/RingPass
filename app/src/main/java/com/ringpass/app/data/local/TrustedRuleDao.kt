@@ -23,18 +23,17 @@ interface TrustedRuleDao {
     @Query("SELECT * FROM trusted_rules WHERE matchKey = :matchKey LIMIT 1")
     suspend fun findByMatchKey(matchKey: String): TrustedRule?
 
-    @Query(
-        "SELECT * FROM trusted_rules " +
-            "WHERE contactName IS NOT NULL AND LOWER(TRIM(contactName)) = LOWER(TRIM(:name)) " +
-            "LIMIT 1"
-    )
+    @Query("SELECT * FROM trusted_rules WHERE contactName IS NOT NULL AND LOWER(TRIM(contactName)) = LOWER(TRIM(:name)) LIMIT 1")
     suspend fun findByExactContactName(name: String): TrustedRule?
 
-    @Query("SELECT * FROM trusted_rules WHERE allowMessages = 1 AND contactName IS NOT NULL")
-    suspend fun getMessageEnabledContacts(): List<TrustedRule>
+    @Query("SELECT * FROM trusted_rules WHERE contactName IS NOT NULL")
+    suspend fun getAllNamedContacts(): List<TrustedRule>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrReplace(rule: TrustedRule): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rules: List<TrustedRule>)
 
     @Update
     suspend fun update(rule: TrustedRule)
@@ -50,6 +49,9 @@ interface TrustedRuleDao {
 
     @Query("UPDATE trusted_rules SET note = :note WHERE id = :id")
     suspend fun updateNote(id: Long, note: String?)
+
+    @Query("UPDATE trusted_rules SET customRingtoneUri = :uri, customRingtoneName = :name WHERE id = :id")
+    suspend fun updateCustomRingtone(id: Long, uri: String?, name: String?)
 
     @Query("UPDATE trusted_rules SET lastTriggeredAt = :timestamp WHERE id = :id")
     suspend fun updateLastTriggeredAt(id: Long, timestamp: Long)

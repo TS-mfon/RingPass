@@ -14,6 +14,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.ringpass.app.service.NoteOverlayService
+import com.ringpass.app.service.CustomRingtonePlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -42,37 +43,49 @@ class DndController(private val context: Context) {
     private var sawActiveCallState: Boolean = false
 
     @Synchronized
-    fun temporarilyUnmuteForCall() {
-        val nm = notificationManager ?: return
-        if (!nm.isNotificationPolicyAccessGranted) return
+    fun temporarilyUnmuteForCall(customRingtoneUri: String? = null): Boolean {
+        val targetFilter = if (customRingtoneUri != null) {
+            NotificationManager.INTERRUPTION_FILTER_ALARMS
+        } else {
+            NotificationManager.INTERRUPTION_FILTER_ALL
+        }
+        val ok = temporarilyUnmuteInternal(registerTelephonyWatcher = true, targetFilter = targetFilter)
+        if (customRingtoneUri != null) {
+            CustomRingtonePlayer.startLooping(appContext, SIM_CALL_KEY, customRingtoneUri, 55_000L)
+        }
+        return ok
+    }
 
+    @Synchronized
+    fun temporarilyUnmuteForVoipCall(): Boolean =
+        temporarilyUnmuteInternal(registerTelephonyWatcher = false, targetFilter = NotificationManager.INTERRUPTION_FILTER_ALL)
+
+    private fun temporarilyUnmuteInternal(registerTelephonyWatcher: Boolean, targetFilter: Int): Boolean {
+        val nm = notificationManager ?: return false
+        if (!nm.isNotificationPolicyAccessGranted) return false
         val currentlyUnmuted = prefs.getBoolean(KEY_IS_UNMUTED, false)
         val currentFilter = nm.currentInterruptionFilter
-
-        if (!currentlyUnmuted && currentFilter != NotificationManager.INTERRUPTION_FILTER_ALL) {
-            prefs.edit()
-                .putInt(KEY_PREVIOUS_FILTER, currentFilter)
-                .putBoolean(KEY_IS_UNMUTED, true)
-                .commit()
+        val shouldAdjust = when (targetFilter) {
+            NotificationManager.INTERRUPTION_FILTER_ALL -> currentFilter != NotificationManager.INTERRUPTION_FILTER_ALL
+            NotificationManager.INTERRUPTION_FILTER_ALARMS -> currentFilter == NotificationManager.INTERRUPTION_FILTER_NONE
+            else -> false
         }
-
-        if (currentFilter != NotificationManager.INTERRUPTION_FILTER_ALL) {
-            try {
-                nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-            } catch (_: SecurityException) {
-                return
-            }
+        if (!currentlyUnmuted && shouldAdjust) {
+            prefs.edit().putInt(KEY_PREVIOUS_FILTER, currentFilter).putBoolean(KEY_IS_UNMUTED, true).commit()
         }
-
+        if (shouldAdjust) {
+            try { nm.setInterruptionFilter(targetFilter) } catch (_: SecurityException) { return false }
+        }
         unmutedAtMillis = System.currentTimeMillis()
         sawActiveCallState = false
-
-        registerCallEndWatcher()
+        if (registerTelephonyWatcher) registerCallEndWatcher() else unregisterCallEndWatcher()
         scheduleTimeoutSafeguard()
+        return true
     }
 
     @Synchronized
     fun restoreDndIfNeeded() {
+        CustomRingtonePlayer.stop(SIM_CALL_KEY)
         val isUnmuted = prefs.getBoolean(KEY_IS_UNMUTED, false)
         if (!isUnmuted) {
             unregisterCallEndWatcher()
@@ -108,15 +121,14 @@ class DndController(private val context: Context) {
 
     private fun handleCallStateChanged(state: Int) {
         when (state) {
-            TelephonyManager.CALL_STATE_RINGING,
+            TelephonyManager.CALL_STATE_RINGING -> sawActiveCallState = true
             TelephonyManager.CALL_STATE_OFFHOOK -> {
                 sawActiveCallState = true
+                CustomRingtonePlayer.stop(SIM_CALL_KEY)
             }
             TelephonyManager.CALL_STATE_IDLE -> {
                 val elapsed = System.currentTimeMillis() - unmutedAtMillis
-                if (sawActiveCallState || elapsed > 5_000L) {
-                    restoreDndIfNeeded()
-                }
+                if (sawActiveCallState || elapsed > 5_000L) restoreDndIfNeeded()
             }
         }
     }
@@ -219,5 +231,6 @@ class DndController(private val context: Context) {
         private const val KEY_IS_UNMUTED = "is_temporarily_unmuted"
         private const val WORK_RESTORE_DND = "ringpass_restore_dnd_safeguard"
         private const val TIMEOUT_SAFEGUARD_MS = 60_000L
+        const val SIM_CALL_KEY = "sim_call"
     }
 }
