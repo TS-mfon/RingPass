@@ -65,25 +65,6 @@ fun WhitelistedContactsScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp)
         ) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                InputChip(
-                    selected = rule.customRingtoneUri != null,
-                    onClick = onPickRingtone,
-                    leadingIcon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
-                    label = {
-                        Text(
-                            text = rule.customRingtoneName
-                                ?: if (hasGlobalRingtone) "Ringtone: Global MP3" else "Set MP3 Ringtone",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                )
-                if (rule.customRingtoneUri != null) {
-                    TextButton(onClick = onClearRingtone) { Text("Reset") }
-                }
-            }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = searchQuery,
@@ -221,6 +202,25 @@ private fun ContactRuleCard(
                 }
             }
 
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                InputChip(
+                    selected = rule.customRingtoneUri != null,
+                    onClick = onPickRingtone,
+                    leadingIcon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
+                    label = {
+                        Text(
+                            text = rule.customRingtoneName
+                                ?: if (hasGlobalRingtone) "Ringtone: Global MP3" else "Set MP3 Ringtone",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                )
+                if (rule.customRingtoneUri != null) {
+                    TextButton(onClick = onClearRingtone) { Text("Reset") }
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(

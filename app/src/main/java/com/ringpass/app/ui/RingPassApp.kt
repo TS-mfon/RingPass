@@ -52,14 +52,6 @@ private enum class RingPassTab(val label: String) {
     CONTACTS("Contacts"),
     NOTED("Noted Numbers"),
     SETUP("Setup")
-    bulkImportContacts?.let { deviceContacts ->
-        BulkImportContactsDialog(
-            deviceContacts = deviceContacts,
-            existingMatchKeys = allMatchKeys,
-            onDismiss = viewModel::dismissBulkImport,
-            onConfirm = viewModel::confirmBulkImport
-        )
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -306,6 +298,15 @@ fun RingPassApp(
             onConfirm = { chosen ->
                 viewModel.confirmMultiNumberContact(picked.displayName, chosen)
             }
+        )
+    }
+
+    bulkImportContacts?.let { deviceContacts ->
+        BulkImportContactsDialog(
+            deviceContacts = deviceContacts,
+            existingMatchKeys = allMatchKeys,
+            onDismiss = viewModel::dismissBulkImport,
+            onConfirm = viewModel::confirmBulkImport
         )
     }
 }
