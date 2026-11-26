@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">RingPass</string>
+    <string name="notification_listener_label">RingPass Message Bypass</string>
+</resources>
