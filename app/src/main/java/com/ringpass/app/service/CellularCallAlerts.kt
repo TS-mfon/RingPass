@@ -61,7 +61,7 @@ internal object CellularCallAlerts {
             }
             TelephonyManager.CALL_STATE_OFFHOOK -> {
                 answered = true
-                CustomRingtonePlayer.stop(RING_KEY)
+                stopRingtone()
             }
             TelephonyManager.CALL_STATE_IDLE -> if (sawRinging) finish(context)
         }
@@ -70,8 +70,14 @@ internal object CellularCallAlerts {
     fun finish(context: Context) {
         if (endTimeout == null) return
         clearWatcher()
-        CustomRingtonePlayer.stop(RING_KEY)
+        stopRingtone()
         NoteOverlayService.dismiss(context)
+    }
+
+    private fun stopRingtone() {
+        if (CustomRingtonePlayer.stop(RING_KEY)) {
+            ListenerDiagnostics.log("Cellular trusted ringtone stopped.")
+        }
     }
 
     private fun clearWatcher() {

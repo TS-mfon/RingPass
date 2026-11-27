@@ -166,7 +166,9 @@ internal object CustomRingtonePlayer {
     }
 
     @MainThread
-    fun stop(key: String) {
-        playing.remove(key)?.cancel()
+    fun stop(key: String): Boolean {
+        val job = playing.remove(key) ?: return false
+        job.cancel()
+        return true
     }
 }
