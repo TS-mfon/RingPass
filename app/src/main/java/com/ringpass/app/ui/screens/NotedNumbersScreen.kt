@@ -377,20 +377,21 @@ private fun NotedRuleCard(
             Spacer(modifier = Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 InputChip(
+                    modifier = Modifier.weight(1f, fill = false),
                     selected = rule.customRingtoneUri != null,
                     onClick = onPickRingtone,
                     leadingIcon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
                     label = {
                         Text(
                             text = rule.customRingtoneName
-                                ?: if (hasGlobalRingtone) "Ringtone: Global MP3" else "Set MP3 Ringtone",
+                                ?: if (hasGlobalRingtone) "Using default ringtone" else "Set ringtone",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 )
                 if (rule.customRingtoneUri != null) {
-                    TextButton(onClick = onClearRingtone) { Text("Reset") }
+                    TextButton(onClick = onClearRingtone) { Text("Use default") }
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))

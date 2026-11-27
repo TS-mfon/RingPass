@@ -3,6 +3,8 @@ package com.ringpass.app.ui.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
@@ -31,9 +34,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -165,28 +170,37 @@ fun MultiNumberContactDialog(
 }
 
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BulkImportContactsDialog(
     deviceContacts: List<DeviceContactEntry>,
-    existingMatchKeys: Set<String>,
+    whitelistedMatchKeys: Set<String>,
     onDismiss: () -> Unit,
     onConfirm: (List<DeviceContactEntry>) -> Unit
 ) {
-    var filter by remember { mutableStateOf("") }
-    val selectedKeys = remember { mutableStateListOf<String>() }
+    var filter by rememberSaveable { mutableStateOf("") }
+    var selection by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    val selectedKeys = remember(selection) { selection.toSet() }
 
     val filtered = remember(deviceContacts, filter) {
         val q = filter.trim()
         if (q.isEmpty()) deviceContacts
-        else deviceContacts.filter {
-            it.displayName.contains(q, ignoreCase = true) || it.rawNumber.contains(q, ignoreCase = true)
+        else {
+            val digits = q.takeUnless { it.any(Char::isLetter) }?.let(PhoneNormalizer::toMatchKey).orEmpty()
+            deviceContacts.filter { contact ->
+                contact.displayName.contains(q, ignoreCase = true) ||
+                    contact.rawNumber.contains(q, ignoreCase = true) ||
+                    (digits.isNotEmpty() && contact.matchKey.contains(digits))
+            }
         }
     }
-    val selectableVisible = remember(filtered, existingMatchKeys) {
-        filtered.filter { it.matchKey !in existingMatchKeys }
+    val visibleKeys = remember(filtered, whitelistedMatchKeys) {
+        filtered.mapNotNull { it.matchKey.takeUnless(whitelistedMatchKeys::contains) }.toSet()
     }
-    val allVisibleSelected = selectableVisible.isNotEmpty() &&
-        selectableVisible.all { selectedKeys.contains(it.matchKey) }
+    val chosen = remember(deviceContacts, selectedKeys, whitelistedMatchKeys) {
+        deviceContacts.filter { it.matchKey in selectedKeys && it.matchKey !in whitelistedMatchKeys }
+    }
+    val allVisibleSelected = visibleKeys.isNotEmpty() && selectedKeys.containsAll(visibleKeys)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -204,34 +218,30 @@ fun BulkImportContactsDialog(
                             }
                         }
                     },
-                    placeholder = { Text("Filter contacts") },
+                    label = { Text("Search contacts") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "${selectedKeys.size} selected",
+                        text = "${chosen.size} selected",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.align(Alignment.CenterVertically)
                     )
                     TextButton(
-                        enabled = selectableVisible.isNotEmpty(),
+                        enabled = visibleKeys.isNotEmpty(),
                         onClick = {
-                            if (allVisibleSelected) {
-                                selectableVisible.forEach { selectedKeys.remove(it.matchKey) }
-                            } else {
-                                selectableVisible.forEach {
-                                    if (!selectedKeys.contains(it.matchKey)) selectedKeys.add(it.matchKey)
-                                }
-                            }
+                            selection = ArrayList(
+                                if (allVisibleSelected) selectedKeys - visibleKeys else selectedKeys + visibleKeys
+                            )
                         }
                     ) {
-                        Text(if (allVisibleSelected) "Clear Visible" else "Select All (${selectableVisible.size})")
+                        Text(if (allVisibleSelected) "Clear results" else "Select results (${visibleKeys.size})")
                     }
                 }
                 if (filtered.isEmpty()) {
@@ -244,29 +254,31 @@ fun BulkImportContactsDialog(
                 } else {
                     LazyColumn(modifier = Modifier.heightIn(max = 340.dp)) {
                         items(filtered, key = { it.matchKey }) { entry ->
-                            val alreadySaved = entry.matchKey in existingMatchKeys
-                            val checked = alreadySaved || selectedKeys.contains(entry.matchKey)
+                            val alreadySaved = entry.matchKey in whitelistedMatchKeys
+                            val checked = alreadySaved || entry.matchKey in selectedKeys
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable(enabled = !alreadySaved) {
-                                        if (selectedKeys.contains(entry.matchKey)) selectedKeys.remove(entry.matchKey)
-                                        else selectedKeys.add(entry.matchKey)
-                                    }
+                                    .toggleable(
+                                        value = checked,
+                                        enabled = !alreadySaved,
+                                        role = Role.Checkbox,
+                                        onValueChange = {
+                                            selection = ArrayList(
+                                                if (it) selectedKeys + entry.matchKey else selectedKeys - entry.matchKey
+                                            )
+                                        }
+                                    )
+                                    .heightIn(min = 48.dp)
                                     .padding(vertical = 4.dp)
                             ) {
                                 Checkbox(
                                     checked = checked,
                                     enabled = !alreadySaved,
-                                    onCheckedChange = { c ->
-                                        if (!alreadySaved) {
-                                            if (c && !selectedKeys.contains(entry.matchKey)) selectedKeys.add(entry.matchKey)
-                                            else if (!c) selectedKeys.remove(entry.matchKey)
-                                        }
-                                    }
+                                    onCheckedChange = null
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(entry.displayName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                     Text(
@@ -282,7 +294,6 @@ fun BulkImportContactsDialog(
             }
         },
         confirmButton = {
-            val chosen = deviceContacts.filter { selectedKeys.contains(it.matchKey) }
             Button(onClick = { onConfirm(chosen) }, enabled = chosen.isNotEmpty()) {
                 Text("Whitelist (${chosen.size})")
             }

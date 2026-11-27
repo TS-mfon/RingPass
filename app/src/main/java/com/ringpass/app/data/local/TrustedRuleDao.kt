@@ -5,7 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -29,14 +29,49 @@ interface TrustedRuleDao {
     @Query("SELECT * FROM trusted_rules WHERE contactName IS NOT NULL")
     suspend fun getAllNamedContacts(): List<TrustedRule>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertOrReplace(rule: TrustedRule): Long
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfNew(rule: TrustedRule): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(rules: List<TrustedRule>)
+    @Query("""
+        UPDATE trusted_rules
+        SET rawNumber = :rawNumber, contactName = :contactName, isSavedContact = 1
+        WHERE matchKey = :matchKey AND (isSavedContact = 0 OR :refreshExisting)
+    """)
+    suspend fun whitelistExistingContact(
+        matchKey: String,
+        rawNumber: String,
+        contactName: String?,
+        refreshExisting: Boolean
+    ): Int
 
-    @Update
-    suspend fun update(rule: TrustedRule)
+    @Transaction
+    suspend fun importWhitelistedContacts(rules: List<TrustedRule>, refreshExisting: Boolean): Int {
+        return rules.count { rule ->
+            insertIfNew(rule) != -1L || whitelistExistingContact(
+                rule.matchKey, rule.rawNumber, rule.contactName, refreshExisting
+            ) > 0
+        }
+    }
+
+    @Query("""
+        UPDATE trusted_rules
+        SET rawNumber = :rawNumber, note = :note, allowCalls = :allowCalls, allowMessages = :allowMessages
+        WHERE matchKey = :matchKey
+    """)
+    suspend fun updateNumberNote(
+        matchKey: String,
+        rawNumber: String,
+        note: String?,
+        allowCalls: Boolean,
+        allowMessages: Boolean
+    )
+
+    @Transaction
+    suspend fun saveNotedNumber(rule: TrustedRule) {
+        if (insertIfNew(rule) == -1L) {
+            updateNumberNote(rule.matchKey, rule.rawNumber, rule.note, rule.allowCalls, rule.allowMessages)
+        }
+    }
 
     @Delete
     suspend fun delete(rule: TrustedRule)
@@ -51,7 +86,7 @@ interface TrustedRuleDao {
     suspend fun updateNote(id: Long, note: String?)
 
     @Query("UPDATE trusted_rules SET customRingtoneUri = :uri, customRingtoneName = :name WHERE id = :id")
-    suspend fun updateCustomRingtone(id: Long, uri: String?, name: String?)
+    suspend fun updateCustomRingtone(id: Long, uri: String?, name: String?): Int
 
     @Query("UPDATE trusted_rules SET lastTriggeredAt = :timestamp WHERE id = :id")
     suspend fun updateLastTriggeredAt(id: Long, timestamp: Long)

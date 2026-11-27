@@ -2,6 +2,8 @@ package com.ringpass.app.util
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.net.Uri
 import android.provider.OpenableColumns
 
@@ -27,13 +29,25 @@ object RingtonePrefs {
         ed.apply()
     }
 
-    fun persistUriPermission(context: Context, uri: Uri) {
-        runCatching {
+    fun validateAndKeepAudio(context: Context, uri: Uri): String? {
+        if (uri.scheme != "content") return null
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(context, uri, null)
+            val hasAudio = (0 until extractor.trackCount).any { track ->
+                extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            }
+            if (!hasAudio) return null
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            resolveDisplayName(context, uri)
+        } catch (_: Exception) {
+            null
+        } finally {
+            extractor.release()
         }
     }
 
-    fun resolveDisplayName(context: Context, uri: Uri): String {
+    private fun resolveDisplayName(context: Context, uri: Uri): String {
         runCatching {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
                 if (c.moveToFirst()) c.getString(0)?.takeIf { it.isNotBlank() }?.let { return it }

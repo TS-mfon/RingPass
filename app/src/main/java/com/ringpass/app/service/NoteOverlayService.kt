@@ -225,7 +225,10 @@ class NoteOverlayService : Service() {
                     try {
                         context.startService(bgIntent)
                     } catch (_: Exception) {
+                        ListenerDiagnostics.log("Android blocked the background caller note overlay.")
                     }
+                } else {
+                    ListenerDiagnostics.log("Android could not start the caller note overlay.")
                 }
             }
         }

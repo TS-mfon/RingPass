@@ -10,17 +10,14 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.content.ComponentName
-import android.media.AudioAttributes
 import android.media.AudioManager
-import android.media.MediaPlayer
-import android.media.RingtoneManager
-import android.media.ToneGenerator
 import android.service.notification.NotificationListenerService
+import android.util.Log
 import com.ringpass.app.data.contacts.DeviceContactEntry
+import com.ringpass.app.service.CustomRingtonePlayer
 import com.ringpass.app.service.ListenerDiagnostics
 import com.ringpass.app.service.SelectiveNotificationListener
 import com.ringpass.app.util.RingtonePrefs
-import kotlinx.coroutines.delay
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -31,13 +28,18 @@ import com.ringpass.app.data.contacts.PickedContactResult
 import com.ringpass.app.data.contacts.RecentUnknownCaller
 import com.ringpass.app.data.local.TrustedRule
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 data class PermissionStatusState(
     val dndPolicyGranted: Boolean = false,
@@ -50,7 +52,8 @@ data class PermissionStatusState(
     val postNotificationsGranted: Boolean = true,
     val batteryOptimizationIgnored: Boolean = false,
     val currentInterruptionFilter: Int = NotificationManager.INTERRUPTION_FILTER_ALL,
-    val alarmVolumePercent: Int = 100
+    val alarmPlaybackAllowed: Boolean = false,
+    val alarmVolumePercent: Int = 0
 ) {
     val runtimePermissionsGranted: Boolean
         get() = contactsGranted && callLogGranted && phoneStateGranted && postNotificationsGranted
@@ -82,15 +85,17 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
     val notedNumbers: StateFlow<List<TrustedRule>> = repository.notedNumbers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val allMatchKeys: StateFlow<Set<String>> = combine(
-        repository.allMatchKeys, _searchQuery
-    ) { keys, _ -> keys.toSet() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    val whitelistedMatchKeys: StateFlow<Set<String>> = repository.whitelistedContacts
+        .map { contacts -> contacts.map(TrustedRule::matchKey).toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     private val _bulkImportContacts = MutableStateFlow<List<DeviceContactEntry>?>(null)
     val bulkImportContacts: StateFlow<List<DeviceContactEntry>?> = _bulkImportContacts.asStateFlow()
+    private var bulkImportTask: Job? = null
 
     private val _globalRingtoneName = MutableStateFlow(RingtonePrefs.getGlobalName(app))
     val globalRingtoneName: StateFlow<String?> = _globalRingtoneName.asStateFlow()
+    private val ringtoneSaveLock = Mutex()
 
     val listenerConnected: StateFlow<Boolean> = ListenerDiagnostics.isConnected
     val listenerLogs: StateFlow<List<String>> = ListenerDiagnostics.logs
@@ -126,6 +131,10 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
         _statusMessage.value = null
     }
 
+    fun showStatusMessage(message: String) {
+        _statusMessage.value = message
+    }
+
     fun refreshPermissions() {
         val ctx = app
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -134,6 +143,7 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
         val audioManager = ctx.getSystemService(AudioManager::class.java)
 
         val dndGranted = nm?.isNotificationPolicyAccessGranted == true
+        if (dndGranted) app.dndController.cleanUpLegacyOverride()
         val roleHeld = roleManager?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true
         val listenerEnabled = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
         val overlayGranted = Settings.canDrawOverlays(ctx)
@@ -145,7 +155,7 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
         } else true
         val batteryIgnored = powerManager?.isIgnoringBatteryOptimizations(ctx.packageName) == true
 
-        val alarmVol = audioManager?.getStreamVolume(AudioManager.STREAM_ALARM) ?: 1
+        val alarmVol = audioManager?.getStreamVolume(AudioManager.STREAM_ALARM) ?: 0
         val alarmMax = (audioManager?.getStreamMaxVolume(AudioManager.STREAM_ALARM) ?: 1).coerceAtLeast(1)
         val alarmPercent = ((alarmVol * 100f) / alarmMax).toInt()
 
@@ -164,6 +174,7 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
             postNotificationsGranted = notificationsGranted,
             batteryOptimizationIgnored = batteryIgnored,
             currentInterruptionFilter = nm?.currentInterruptionFilter ?: NotificationManager.INTERRUPTION_FILTER_ALL,
+            alarmPlaybackAllowed = app.dndController.allowsAlarmPlayback(),
             alarmVolumePercent = alarmPercent
         )
     }
@@ -181,106 +192,93 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
 
     fun testBypassSound() {
         refreshPermissions()
-        val alarmPercent = _permissions.value.alarmVolumePercent
-        if (alarmPercent == 0) {
-            _statusMessage.value = "Alarm volume is 0%! Turn up Alarm volume so DND bypass sounds are audible."
+        val status = _permissions.value
+        if (!status.alarmPlaybackAllowed) {
+            _statusMessage.value = "Allow alarms in your active Do Not Disturb mode, then try again."
             return
         }
-        val globalUri = RingtonePrefs.getGlobalUri(app)?.let { runCatching { Uri.parse(it) }.getOrNull() }
-        val soundUri = globalUri
-            ?: RingtoneManager.getActualDefaultRingtoneUri(app, RingtoneManager.TYPE_NOTIFICATION)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-        if (soundUri == null) {
-            playTestTone()
-            _statusMessage.value = "Played fallback tone (Alarm vol: $alarmPercent%)."
+        if (status.alarmVolumePercent == 0) {
+            _statusMessage.value = "Turn up Alarm volume, then try again."
             return
         }
-        val player = MediaPlayer()
-        try {
-            player.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            player.setDataSource(app, soundUri)
-            player.setOnPreparedListener { mp ->
-                mp.start()
-                viewModelScope.launch {
-                    delay(2_500L)
-                    runCatching { if (mp.isPlaying) mp.stop() }
-                    runCatching { mp.release() }
-                }
-            }
-            player.setOnCompletionListener { mp -> runCatching { mp.release() } }
-            player.setOnErrorListener { mp, _, _ ->
-                runCatching { mp.release() }
-                playTestTone()
-                true
-            }
-            player.prepareAsync()
-            _statusMessage.value = "Playing bypass audio (Alarm vol: $alarmPercent%)."
-        } catch (_: Exception) {
-            runCatching { player.release() }
-            playTestTone()
-            _statusMessage.value = "Played fallback tone (Alarm vol: $alarmPercent%)."
-        }
-    }
-
-    private fun playTestTone() {
-        runCatching {
-            val tg = ToneGenerator(AudioManager.STREAM_ALARM, 95)
-            tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 450)
-            viewModelScope.launch {
-                delay(600L)
-                runCatching { tg.release() }
-            }
+        viewModelScope.launch {
+            val started = CustomRingtonePlayer.ring(
+                app, "preview", contactUri = null, alarm = true, durationMs = 2_500L
+            ) { app.dndController.allowsAlarmPlayback() }
+            _statusMessage.value = if (started) "Playing the RingPass ringtone on Alarm volume."
+                else "RingPass could not play the ringtone."
         }
     }
 
     fun openBulkImportContacts() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val all = DeviceContactsAndCallLogHelper.loadAllDeviceContacts(app)
-            if (all.isEmpty()) _statusMessage.value = "No device contacts with phone numbers found."
-            else _bulkImportContacts.value = all
+        if (bulkImportTask?.isActive == true) return
+        bulkImportTask = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val all = DeviceContactsAndCallLogHelper.loadAllDeviceContacts(app)
+                if (all.isEmpty()) _statusMessage.value = "No device contacts with phone numbers found."
+                else _bulkImportContacts.value = all
+            } catch (error: SecurityException) {
+                _statusMessage.value = "Grant Contacts access to import phone numbers."
+            } catch (error: RuntimeException) {
+                Log.w("RingPass", "Unable to read device contacts", error)
+                _statusMessage.value = "Could not load contacts. Try importing again."
+            }
         }
     }
 
     fun dismissBulkImport() { _bulkImportContacts.value = null }
 
     fun confirmBulkImport(entries: List<DeviceContactEntry>) {
+        if (_bulkImportContacts.value == null) return
         _bulkImportContacts.value = null
-        viewModelScope.launch(Dispatchers.IO) {
-            val added = repository.bulkWhitelistContacts(entries)
-            _statusMessage.value = "Whitelisted $added contact(s)"
+        bulkImportTask = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val added = repository.bulkWhitelistContacts(entries)
+                _statusMessage.value = when (added) {
+                    0 -> "These numbers are already whitelisted."
+                    1 -> "Whitelisted 1 phone number."
+                    else -> "Whitelisted $added phone numbers."
+                }
+            } catch (error: android.database.SQLException) {
+                Log.w("RingPass", "Unable to import device contacts", error)
+                _statusMessage.value = "Could not whitelist the selected numbers. Try importing again."
+            }
         }
     }
 
     fun setGlobalRingtone(uri: Uri?) {
-        if (uri == null) {
-            RingtonePrefs.setGlobalRingtone(app, null, null)
-            _globalRingtoneName.value = null
-            _statusMessage.value = "Reset global ringtone to system default"
-            return
+        saveRingtone(uri) { selectedUri, name ->
+            RingtonePrefs.setGlobalRingtone(app, selectedUri, name)
+            _globalRingtoneName.value = name
+            if (name == null) "Restored the system ringtone" else "Default ringtone set to $name"
         }
-        RingtonePrefs.persistUriPermission(app, uri)
-        val name = RingtonePrefs.resolveDisplayName(app, uri)
-        RingtonePrefs.setGlobalRingtone(app, uri.toString(), name)
-        _globalRingtoneName.value = name
-        _statusMessage.value = "Global ringtone set: $name"
     }
 
     fun setRuleRingtone(ruleId: Long, uri: Uri?) {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (uri == null) {
-                repository.updateCustomRingtone(ruleId, null, null)
-                _statusMessage.value = "Reset contact ringtone"
-            } else {
-                RingtonePrefs.persistUriPermission(app, uri)
-                val name = RingtonePrefs.resolveDisplayName(app, uri)
-                repository.updateCustomRingtone(ruleId, uri.toString(), name)
-                _statusMessage.value = "Contact ringtone set: $name"
+        saveRingtone(uri) { selectedUri, name ->
+            val updated = repository.updateCustomRingtone(ruleId, selectedUri, name)
+            when {
+                updated == 0 -> "This number is no longer in RingPass."
+                name == null -> "This number now uses the default ringtone."
+                else -> "Ringtone set to $name"
+            }
+        }
+    }
+
+    private fun saveRingtone(uri: Uri?, save: suspend (String?, String?) -> String) {
+        viewModelScope.launch {
+            ringtoneSaveLock.withLock {
+                val name = uri?.let { withContext(Dispatchers.IO) { RingtonePrefs.validateAndKeepAudio(app, it) } }
+                if (uri != null && name == null) {
+                    _statusMessage.value = "Could not keep access to this audio. Choose another file from your device."
+                    return@withLock
+                }
+                try {
+                    _statusMessage.value = save(uri?.toString(), name)
+                } catch (error: android.database.SQLException) {
+                    Log.w("RingPass", "Unable to save ringtone", error)
+                    _statusMessage.value = "Could not save the ringtone. Try again."
+                }
             }
         }
     }
@@ -322,12 +320,7 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
     fun confirmMultiNumberContact(contactName: String, numbers: List<String>) {
         _pendingMultiNumberContact.value = null
         viewModelScope.launch(Dispatchers.IO) {
-            var count = 0
-            numbers.forEach { number ->
-                if (repository.upsertWhitelistedContact(number, contactName)) {
-                    count++
-                }
-            }
+            val count = repository.whitelistContactNumbers(contactName, numbers)
             _statusMessage.value = "Added $count number(s) for $contactName"
         }
     }

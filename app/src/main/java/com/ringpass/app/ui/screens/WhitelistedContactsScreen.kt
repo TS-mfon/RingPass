@@ -3,6 +3,8 @@ package com.ringpass.app.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -42,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ringpass.app.data.local.TrustedRule
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun WhitelistedContactsScreen(
     contacts: List<TrustedRule>,
@@ -83,9 +86,8 @@ fun WhitelistedContactsScreen(
             )
             Spacer(modifier = Modifier.height(12.dp))
 
-            Row(
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 FilledTonalButton(onClick = onBulkImportClick) {
@@ -93,14 +95,20 @@ fun WhitelistedContactsScreen(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Bulk Import")
                 }
-                FilledTonalButton(onClick = onPickGlobalRingtone, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Rounded.MusicNote, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(globalRingtoneName ?: "All Contacts MP3", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (globalRingtoneName != null) {
-                    IconButton(onClick = onClearGlobalRingtone) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Reset global MP3")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    FilledTonalButton(onClick = onPickGlobalRingtone, modifier = Modifier.weight(1f, fill = false)) {
+                        Icon(Icons.Rounded.MusicNote, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            globalRingtoneName ?: "Default ringtone",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (globalRingtoneName != null) {
+                        IconButton(onClick = onClearGlobalRingtone) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Restore system ringtone")
+                        }
                     }
                 }
             }
@@ -205,20 +213,21 @@ private fun ContactRuleCard(
             Spacer(modifier = Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 InputChip(
+                    modifier = Modifier.weight(1f, fill = false),
                     selected = rule.customRingtoneUri != null,
                     onClick = onPickRingtone,
                     leadingIcon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
                     label = {
                         Text(
                             text = rule.customRingtoneName
-                                ?: if (hasGlobalRingtone) "Ringtone: Global MP3" else "Set MP3 Ringtone",
+                                ?: if (hasGlobalRingtone) "Using default ringtone" else "Set ringtone",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 )
                 if (rule.customRingtoneUri != null) {
-                    TextButton(onClick = onClearRingtone) { Text("Reset") }
+                    TextButton(onClick = onClearRingtone) { Text("Use default") }
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))

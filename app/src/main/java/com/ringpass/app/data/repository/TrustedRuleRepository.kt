@@ -19,99 +19,51 @@ class TrustedRuleRepository(
         return dao.findByMatchKey(key)
     }
 
-    suspend fun findForMessageSender(candidates: List<String>): TrustedRule? =
-        findForRuleCandidates(candidates)
-
     suspend fun findForRuleCandidates(candidates: List<String>): TrustedRule? {
-        val expanded = candidates.flatMap { raw ->
-            val cleaned = PhoneNormalizer.cleanText(raw)
-            if (cleaned.isBlank()) emptyList()
-            else buildList {
-                add(cleaned)
-                val strippedCount = cleanSenderTitle(cleaned)
-                if (strippedCount != cleaned && strippedCount.isNotBlank()) add(strippedCount)
-                if (cleaned.contains(": ")) {
-                    val afterColon = cleaned.substringAfterLast(": ").trim()
-                    if (afterColon.isNotBlank()) add(afterColon)
-                }
-            }
-        }.distinct()
+        val titles = candidates.map(::cleanSenderTitle).filter(String::isNotBlank).distinct()
+        val numbers = titles.filter(PhoneNormalizer::looksLikePhoneNumber)
+        if (numbers.isNotEmpty()) return numbers.firstNotNullOfOrNull { findByNumber(it) }
+        if (titles.isEmpty()) return null
 
-        for (c in expanded) {
-            if (PhoneNormalizer.looksLikePhoneNumber(c)) {
-                val key = PhoneNormalizer.toMatchKey(c)
-                if (key.isNotBlank()) dao.findByMatchKey(key)?.let { return it }
+        val named = dao.getAllNamedContacts().filter(TrustedRule::isSavedContact)
+        for (title in titles) {
+            val matching = named.filter {
+                PhoneNormalizer.cleanText(it.contactName.orEmpty()).equals(title, ignoreCase = true)
             }
-        }
-        for (c in expanded) {
-            val cleanedName = cleanSenderTitle(c)
-            if (cleanedName.isNotBlank()) dao.findByExactContactName(cleanedName)?.let { return it }
-        }
-        val named = dao.getAllNamedContacts()
-        for (c in expanded) {
-            val norm = cleanSenderTitle(c)
-            val match = named.firstOrNull { rule ->
-                val contact = PhoneNormalizer.cleanText(rule.contactName.orEmpty())
-                contact.isNotEmpty() && (
-                    norm.equals(contact, ignoreCase = true) ||
-                        norm.startsWith("$contact (", ignoreCase = true) ||
-                        norm.endsWith(": $contact", ignoreCase = true)
-                    )
-            }
-            if (match != null) return match
+            val first = matching.firstOrNull() ?: continue
+            if (matching.all {
+                it.allowCalls == first.allowCalls && it.allowMessages == first.allowMessages &&
+                    it.customRingtoneUri == first.customRingtoneUri
+            }) return first
+            return null
         }
         return null
     }
 
     suspend fun upsertWhitelistedContact(rawNumber: String, contactName: String): Boolean {
-        val matchKey = PhoneNormalizer.toMatchKey(rawNumber)
-        if (matchKey.isBlank()) return false
-        val existing = dao.findByMatchKey(matchKey)
-        dao.insertOrReplace(
-            TrustedRule(
-                id = existing?.id ?: 0L,
-                rawNumber = rawNumber.trim(),
-                matchKey = matchKey,
-                contactName = PhoneNormalizer.cleanText(contactName),
-                note = existing?.note,
-                isSavedContact = true,
-                allowCalls = existing?.allowCalls ?: true,
-                allowMessages = existing?.allowMessages ?: true,
-                createdAt = existing?.createdAt ?: System.currentTimeMillis(),
-                lastTriggeredAt = existing?.lastTriggeredAt,
-                customRingtoneUri = existing?.customRingtoneUri,
-                customRingtoneName = existing?.customRingtoneName
-            )
-        )
-        return true
+        return whitelistContactNumbers(contactName, listOf(rawNumber)) == 1
+    }
+
+    suspend fun whitelistContactNumbers(contactName: String, rawNumbers: List<String>): Int {
+        val rules = rawNumbers.mapNotNull { contactRule(it, contactName) }.distinctBy(TrustedRule::matchKey)
+        return dao.importWhitelistedContacts(rules, refreshExisting = true)
     }
 
     suspend fun bulkWhitelistContacts(entries: List<DeviceContactEntry>): Int {
-        if (entries.isEmpty()) return 0
-        val rules = mutableListOf<TrustedRule>()
-        for (entry in entries) {
-            val key = entry.matchKey.ifBlank { PhoneNormalizer.toMatchKey(entry.rawNumber) }
-            if (key.isBlank()) continue
-            val existing = dao.findByMatchKey(key)
-            rules.add(
-                TrustedRule(
-                    id = existing?.id ?: 0L,
-                    rawNumber = entry.rawNumber.trim(),
-                    matchKey = key,
-                    contactName = PhoneNormalizer.cleanText(entry.displayName),
-                    note = existing?.note,
-                    isSavedContact = true,
-                    allowCalls = existing?.allowCalls ?: true,
-                    allowMessages = existing?.allowMessages ?: true,
-                    createdAt = existing?.createdAt ?: System.currentTimeMillis(),
-                    lastTriggeredAt = existing?.lastTriggeredAt,
-                    customRingtoneUri = existing?.customRingtoneUri,
-                    customRingtoneName = existing?.customRingtoneName
-                )
-            )
-        }
-        if (rules.isNotEmpty()) dao.insertAll(rules)
-        return rules.size
+        val rules = entries.mapNotNull { contactRule(it.rawNumber, it.displayName) }
+            .distinctBy(TrustedRule::matchKey)
+        return dao.importWhitelistedContacts(rules, refreshExisting = false)
+    }
+
+    private fun contactRule(rawNumber: String, contactName: String): TrustedRule? {
+        val matchKey = PhoneNormalizer.toMatchKey(rawNumber)
+        if (matchKey.length < 7) return null
+        return TrustedRule(
+            rawNumber = rawNumber.trim(),
+            matchKey = matchKey,
+            contactName = PhoneNormalizer.cleanText(contactName).ifBlank { null },
+            isSavedContact = true
+        )
     }
 
     suspend fun upsertNotedNumber(
@@ -121,22 +73,15 @@ class TrustedRuleRepository(
         allowMessages: Boolean = true
     ): Boolean {
         val matchKey = PhoneNormalizer.toMatchKey(rawNumber)
-        if (matchKey.isBlank()) return false
-        val existing = dao.findByMatchKey(matchKey)
-        dao.insertOrReplace(
+        if (matchKey.length < 7 || note.isBlank()) return false
+        dao.saveNotedNumber(
             TrustedRule(
-                id = existing?.id ?: 0L,
                 rawNumber = PhoneNormalizer.toE164(rawNumber).ifBlank { rawNumber.trim() },
                 matchKey = matchKey,
-                contactName = existing?.contactName,
                 note = note.trim(),
-                isSavedContact = existing?.isSavedContact ?: false,
+                isSavedContact = false,
                 allowCalls = allowCalls,
-                allowMessages = allowMessages,
-                createdAt = existing?.createdAt ?: System.currentTimeMillis(),
-                lastTriggeredAt = existing?.lastTriggeredAt,
-                customRingtoneUri = existing?.customRingtoneUri,
-                customRingtoneName = existing?.customRingtoneName
+                allowMessages = allowMessages
             )
         )
         return true

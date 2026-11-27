@@ -47,6 +47,7 @@ fun SetupScreen(
     listenerLogs: List<String>,
     globalRingtoneName: String?,
     onOpenDndSettings: () -> Unit,
+    onOpenDndModeSettings: () -> Unit,
     onRequestCallScreeningRole: () -> Unit,
     onOpenNotificationListenerSettings: () -> Unit,
     onOpenOverlaySettings: () -> Unit,
@@ -103,7 +104,7 @@ fun SetupScreen(
                         )
                         Text(
                             text = if (status.isDndActive) {
-                                "RingPass is actively guarding calls & messages."
+                                "RingPass uses Alarm audio for trusted calls and messages."
                             } else {
                                 "Enable system DND so only RingPass rules ring through."
                             },
@@ -118,14 +119,34 @@ fun SetupScreen(
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp)) {
+                    Text("Allow alarms in Do Not Disturb", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (status.isDndActive && !status.alarmPlaybackAllowed)
+                            "Your active DND mode blocks RingPass audio."
+                        else "RingPass needs an active DND mode that allows alarms.",
+                        color = if (status.isDndActive && !status.alarmPlaybackAllowed)
+                            MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Keep Calls, Messages and Apps silenced, turn off repeat callers, and allow Alarms. Then turn up Alarm volume.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    FilledTonalButton(onClick = onOpenDndModeSettings) { Text("Open DND Mode") }
+                }
+            }
+        }
+
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Global Custom Ringtone (All Contacts)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Default RingPass Ringtone", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = if (globalRingtoneName != null) "Active MP3/Audio: $globalRingtoneName" else "Using phone's default ringtone (tap below to pick an MP3/audio file for all callers).",
+                        text = if (globalRingtoneName != null) "Active MP3/Audio: $globalRingtoneName" else "Uses the phone’s default ringtone. Pick an audio file for trusted callers without their own ringtone.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -152,7 +173,7 @@ fun SetupScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Alarm Volume: ${status.alarmVolumePercent}% (must be > 0% for WhatsApp & MP3 audio under DND).",
+                        text = "Alarm volume ${status.alarmVolumePercent}%",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (status.alarmVolumePercent == 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -189,7 +210,7 @@ fun SetupScreen(
         item {
             SetupPermissionCard(
                 title = "1. Do Not Disturb Access",
-                description = "Required to briefly lift DND when a whitelisted or noted caller rings, then restore it.",
+                description = "Lets RingPass check the DND policy on Android 10 and clear any override left by an older build.",
                 granted = status.dndPolicyGranted,
                 buttonLabel = "Open DND Settings",
                 onAction = onOpenDndSettings
@@ -199,7 +220,7 @@ fun SetupScreen(
         item {
             SetupPermissionCard(
                 title = "2. Call Screening App Role",
-                description = "Allows RingPass to inspect incoming numbers in real time without blocking calls.",
+                description = "Lets RingPass detect incoming cellular calls. Grant Contacts access below so Android also sends calls from saved contacts.",
                 granted = status.callScreeningRoleHeld,
                 buttonLabel = "Set Call Screener",
                 onAction = onRequestCallScreeningRole
@@ -209,7 +230,7 @@ fun SetupScreen(
         item {
             SetupPermissionCard(
                 title = "3. Notification Listener Access",
-                description = "Allows RingPass to sound an alarm-channel chime for whitelisted SMS/WhatsApp/Telegram senders.",
+                description = "Lets RingPass detect incoming WhatsApp calls and trusted SMS, WhatsApp and Telegram messages.",
                 granted = status.notificationListenerGranted,
                 buttonLabel = "Enable Listener",
                 onAction = onOpenNotificationListenerSettings

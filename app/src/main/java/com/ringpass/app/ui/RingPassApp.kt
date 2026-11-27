@@ -3,6 +3,7 @@ package com.ringpass.app.ui
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.role.RoleManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -68,7 +69,7 @@ fun RingPassApp(
     val contacts by viewModel.filteredContacts.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val notedNumbers by viewModel.notedNumbers.collectAsStateWithLifecycle()
-    val allMatchKeys by viewModel.allMatchKeys.collectAsStateWithLifecycle()
+    val whitelistedMatchKeys by viewModel.whitelistedMatchKeys.collectAsStateWithLifecycle()
     val bulkImportContacts by viewModel.bulkImportContacts.collectAsStateWithLifecycle()
     val globalRingtoneName by viewModel.globalRingtoneName.collectAsStateWithLifecycle()
     val listenerConnected by viewModel.listenerConnected.collectAsStateWithLifecycle()
@@ -108,6 +109,16 @@ fun RingPassApp(
         }
     }
 
+    val pickRingtone: (Long) -> Unit = { ruleId ->
+        ringtoneTargetRuleId = ruleId
+        try {
+            audioPickerLauncher.launch(arrayOf("audio/*"))
+        } catch (_: ActivityNotFoundException) {
+            ringtoneTargetRuleId = -1L
+            viewModel.showStatusMessage("Android could not open a file picker for audio.")
+        }
+    }
+
     val contactsPermLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -117,6 +128,8 @@ fun RingPassApp(
         if (granted) {
             if (action == 1) pickContactLauncher.launch(null)
             else if (action == 2) viewModel.openBulkImportContacts()
+        } else if (action != 0) {
+            viewModel.showStatusMessage("Grant Contacts access in Setup to import contacts.")
         }
     }
 
@@ -194,15 +207,9 @@ fun RingPassApp(
                     onSearchChange = viewModel::updateSearchQuery,
                     onPickContactClick = { runContactsAction(1) },
                     onBulkImportClick = { runContactsAction(2) },
-                    onPickGlobalRingtone = {
-                        ringtoneTargetRuleId = -1L
-                        audioPickerLauncher.launch(arrayOf("audio/*"))
-                    },
+                    onPickGlobalRingtone = { pickRingtone(-1L) },
                     onClearGlobalRingtone = { viewModel.setGlobalRingtone(null) },
-                    onPickRuleRingtone = { rule ->
-                        ringtoneTargetRuleId = rule.id
-                        audioPickerLauncher.launch(arrayOf("audio/*"))
-                    },
+                    onPickRuleRingtone = { rule -> pickRingtone(rule.id) },
                     onClearRuleRingtone = { rule -> viewModel.setRuleRingtone(rule.id, null) },
                     onToggleCalls = viewModel::toggleAllowCalls,
                     onToggleMessages = viewModel::toggleAllowMessages,
@@ -221,7 +228,7 @@ fun RingPassApp(
                     onRefreshCallLog = { viewModel.refreshRecentUnknownCallers() },
                     onSaveNote = viewModel::saveNotedNumber,
                     onUpdateNote = viewModel::updateExistingNote,
-                    onPickRuleRingtone = { rule -> ringtoneTargetRuleId = rule.id; audioPickerLauncher.launch(arrayOf("audio/*")) },
+                    onPickRuleRingtone = { rule -> pickRingtone(rule.id) },
                     onClearRuleRingtone = { rule -> viewModel.setRuleRingtone(rule.id, null) },
                     onToggleCalls = viewModel::toggleAllowCalls,
                     onToggleMessages = viewModel::toggleAllowMessages,
@@ -240,6 +247,13 @@ fun RingPassApp(
                         context.startActivity(
                             Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
                         )
+                    },
+                    onOpenDndModeSettings = {
+                        try {
+                            context.startActivity(Intent("android.settings.ZEN_MODE_SETTINGS"))
+                        } catch (_: ActivityNotFoundException) {
+                            context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS))
+                        }
                     },
                     onRequestCallScreeningRole = {
                         val roleManager = context.getSystemService(RoleManager::class.java)
@@ -275,7 +289,7 @@ fun RingPassApp(
                     },
                     onRebindListener = { viewModel.rebindNotificationListener(silent = false) },
                     onTestBypassSound = viewModel::testBypassSound,
-                    onPickGlobalRingtone = { ringtoneTargetRuleId = -1L; audioPickerLauncher.launch(arrayOf("audio/*")) },
+                    onPickGlobalRingtone = { pickRingtone(-1L) },
                     onClearGlobalRingtone = { viewModel.setGlobalRingtone(null) },
                     onOpenAppDetailsSettings = {
                         context.startActivity(
@@ -304,7 +318,7 @@ fun RingPassApp(
     bulkImportContacts?.let { deviceContacts ->
         BulkImportContactsDialog(
             deviceContacts = deviceContacts,
-            existingMatchKeys = allMatchKeys,
+            whitelistedMatchKeys = whitelistedMatchKeys,
             onDismiss = viewModel::dismissBulkImport,
             onConfirm = viewModel::confirmBulkImport
         )

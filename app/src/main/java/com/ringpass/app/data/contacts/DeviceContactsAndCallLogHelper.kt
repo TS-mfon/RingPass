@@ -8,6 +8,7 @@ import android.provider.CallLog
 import android.provider.ContactsContract
 import androidx.core.content.ContextCompat
 import com.ringpass.app.util.PhoneNormalizer
+import java.text.Collator
 
 data class PickedContactResult(
     val displayName: String,
@@ -60,13 +61,13 @@ object DeviceContactsAndCallLogHelper {
         )?.use { phoneCursor ->
             while (phoneCursor.moveToNext()) {
                 val number = phoneCursor.getString(0)?.trim()
-                if (!number.isNullOrBlank() && PhoneNormalizer.toMatchKey(number).isNotBlank()) {
+                if (!number.isNullOrBlank() && PhoneNormalizer.toMatchKey(number).length >= 7) {
                     numbers.add(number)
                 }
             }
         }
 
-        return PickedContactResult(displayName = displayName, phoneNumbers = numbers.toList())
+        return PickedContactResult(displayName = displayName, phoneNumbers = numbers.distinctBy(PhoneNormalizer::toMatchKey))
     }
 
     fun isNumberInSystemContacts(context: Context, rawNumber: String): Boolean {
@@ -187,29 +188,28 @@ object DeviceContactsAndCallLogHelper {
     }
 
     fun loadAllDeviceContacts(context: Context): List<DeviceContactEntry> {
-        if (!hasPermission(context, Manifest.permission.READ_CONTACTS)) return emptyList()
-        val seenKeys = HashSet<String>()
         val results = mutableListOf<DeviceContactEntry>()
-        try {
-            context.contentResolver.query(
-                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY, ContactsContract.CommonDataKinds.Phone.NUMBER),
-                null, null,
-                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY} COLLATE NOCASE ASC"
-            )?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val name = PhoneNormalizer.cleanText(cursor.getString(0).orEmpty()).ifBlank { "Unnamed Contact" }
-                    val number = cursor.getString(1)?.trim().orEmpty()
-                    if (number.isBlank()) continue
-                    val matchKey = PhoneNormalizer.toMatchKey(number)
-                    if (matchKey.length < 7 || !seenKeys.add(matchKey)) continue
-                    results.add(DeviceContactEntry(displayName = name, rawNumber = number, matchKey = matchKey))
-                }
+        context.contentResolver.query(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY,
+                ContactsContract.CommonDataKinds.Phone.NUMBER
+            ),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val name = PhoneNormalizer.cleanText(cursor.getString(0).orEmpty()).ifBlank { "Unnamed contact" }
+                val number = cursor.getString(1)?.trim().orEmpty()
+                val matchKey = PhoneNormalizer.toMatchKey(number)
+                if (matchKey.length < 7) continue
+                results.add(DeviceContactEntry(displayName = name, rawNumber = number, matchKey = matchKey))
             }
-        } catch (_: SecurityException) {
-            return emptyList()
         }
-        return results
+        val names = Collator.getInstance()
+        return results.sortedWith { left, right -> names.compare(left.displayName, right.displayName) }
+            .distinctBy(DeviceContactEntry::matchKey)
     }
 
     private fun hasPermission(context: Context, permission: String): Boolean {
