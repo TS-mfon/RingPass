@@ -30,7 +30,6 @@ import com.ringpass.app.data.contacts.RecentUnknownCaller
 import com.ringpass.app.data.local.TrustedRule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -218,8 +217,8 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
                 val received = withTimeoutOrNull(4_000L) {
                     ListenerDiagnostics.probeReceived.first { it == token }
                 } != null
-                _statusMessage.value = if (received) "Android delivered an ongoing notification to RingPass."
-                else "Android connected the listener but did not deliver the test. Check ongoing notification access."
+                _statusMessage.value = if (received) "Android delivered the listener test to RingPass."
+                else "Android connected the listener but did not deliver the test. Check that Android allows alerting notifications for the listener."
             } finally {
                 app.getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.LISTENER_PROBE_ID)
             }

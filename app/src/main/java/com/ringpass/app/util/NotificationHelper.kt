@@ -53,10 +53,11 @@ object NotificationHelper {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         if (!manager.areNotificationsEnabled()) return false
         val channel = NotificationChannel(
-            CHANNEL_LISTENER_TEST, "Listener verification", NotificationManager.IMPORTANCE_LOW
+            CHANNEL_LISTENER_TEST, "Listener verification", NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             setShowBadge(false)
             setSound(null, null)
+            enableVibration(false)
         }
         return try {
             manager.createNotificationChannel(channel)

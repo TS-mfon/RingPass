@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-adb install app/build/outputs/apk/debug/app-debug.apk
+adb install "$RUNNER_TEMP/RingPass-debug.apk"
 adb install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb install test-fixtures/whatsapp/build/outputs/apk/debug/whatsapp-debug.apk
 adb shell pm grant com.whatsapp android.permission.POST_NOTIFICATIONS
@@ -47,9 +47,15 @@ adb shell am instrument -w -r -e class com.ringpass.app.WhatsAppCallSmokeTest \
     com.ringpass.app.test/androidx.test.runner.AndroidJUnitRunner >"$test_output" &
 test_pid=$!
 wait_for_marker READY_FOR_WHATSAPP
-adb shell am broadcast -n com.whatsapp/com.ringpass.testfixture.CallFixtureReceiver --es state screening
+adb shell am broadcast --include-stopped-packages -n com.whatsapp/com.ringpass.testfixture.CallFixtureReceiver --es state screening
 wait_for_marker READY_TO_ANSWER_WHATSAPP
-adb shell am broadcast -n com.whatsapp/com.ringpass.testfixture.CallFixtureReceiver --es state ongoing
+adb shell am broadcast --include-stopped-packages -n com.whatsapp/com.ringpass.testfixture.CallFixtureReceiver --es state ongoing
 wait "$test_pid"
 cat "$test_output"
 grep -F 'OK (1 test)' "$test_output"
+
+
+adb install "$RUNNER_TEMP/RingPass-recovery.apk"
+bash .github/scripts/copy-recovery-data.sh
+adb shell run-as com.ringpass.app test -s databases/ringpass.db
+adb shell run-as com.ringpass.app.recovery test -s databases/ringpass.db

@@ -29,6 +29,9 @@ public final class CallFixtureReceiver extends BroadcastReceiver {
         PendingIntent action = PendingIntent.getBroadcast(
                 context, 0, new Intent(context, CallFixtureReceiver.class).putExtra("state", "remove"),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent fullScreen = PendingIntent.getActivity(
+                context, 1, new Intent(android.provider.Settings.ACTION_SETTINGS),
+                PendingIntent.FLAG_IMMUTABLE);
         Notification.CallStyle style = "ongoing".equals(state)
                 ? Notification.CallStyle.forOngoingCall(person, action)
                 : Notification.CallStyle.forScreeningCall(person, action, action);
@@ -37,6 +40,7 @@ public final class CallFixtureReceiver extends BroadcastReceiver {
                 .setSmallIcon(android.R.drawable.sym_action_call)
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
+                .setFullScreenIntent(fullScreen, true)
                 .setStyle(style)
                 .build());
     }

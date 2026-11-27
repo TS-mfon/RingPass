@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val recoveryBuild = providers.gradleProperty("ringpassRecoveryBuild").orNull == "true"
+
 android {
     namespace = "com.ringpass.app"
     compileSdk = 35
@@ -15,11 +17,15 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "1.0.1"
+        manifestPlaceholders["ringPassLabel"] = if (recoveryBuild) "RingPass Recovery" else "@string/app_name"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
+        debug {
+            if (recoveryBuild) applicationIdSuffix = ".recovery"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
