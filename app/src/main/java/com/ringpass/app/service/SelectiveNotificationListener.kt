@@ -12,6 +12,7 @@ import android.util.Log
 import androidx.core.os.BundleCompat
 import com.ringpass.app.RingPassApplication
 import com.ringpass.app.data.local.TrustedRule
+import com.ringpass.app.util.NotificationHelper
 import com.ringpass.app.util.PhoneNormalizer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -60,7 +61,13 @@ class SelectiveNotificationListener : NotificationListenerService() {
     }
 
     private fun handleNotification(sbn: StatusBarNotification, allowMessages: Boolean) {
-        if (sbn.packageName == packageName) return
+        if (sbn.packageName == packageName) {
+            if (sbn.id == NotificationHelper.LISTENER_PROBE_ID) {
+                val token = sbn.notification.extras?.getLong(NotificationHelper.EXTRA_LISTENER_PROBE)
+                if (token != null && token != 0L) ListenerDiagnostics.onProbeReceived(token)
+            }
+            return
+        }
         val notification = sbn.notification
         val extras = notification.extras ?: return
         val isWhatsApp = sbn.packageName in WHATSAPP_PACKAGES
@@ -103,10 +110,14 @@ class SelectiveNotificationListener : NotificationListenerService() {
     }
 
     private fun beginCall(sbn: StatusBarNotification, candidates: List<String>) {
-        if (candidates.isEmpty()) return
+        if (candidates.isEmpty()) {
+            ListenerDiagnostics.log("Incoming WhatsApp call has no caller name or number.")
+            return
+        }
         val key = sbn.key
         if (identitiesInCall[key] == candidates) return
         stopCall(key)
+        ListenerDiagnostics.log("Incoming WhatsApp call detected.")
         identitiesInCall[key] = candidates
         val job = scope.launch(start = CoroutineStart.LAZY) {
             val lookup = coroutineContext[Job]
@@ -221,7 +232,9 @@ class SelectiveNotificationListener : NotificationListenerService() {
     private fun stopCall(key: String) {
         identitiesInCall.remove(key)
         pendingCalls.remove(key)?.cancel()
-        if (activeCalls.remove(key)) CustomRingtonePlayer.stop(key)
+        if (activeCalls.remove(key) && CustomRingtonePlayer.stop(key)) {
+            ListenerDiagnostics.log("WhatsApp ringtone stopped.")
+        }
     }
 
     private fun clearAlerts() {

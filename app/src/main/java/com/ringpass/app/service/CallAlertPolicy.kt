@@ -14,7 +14,9 @@ internal fun whatsAppEvent(
     actionCount: Int = 0,
     text: String = ""
 ): WhatsAppEvent {
-    if (callType == CallStyle.CALL_TYPE_INCOMING) return WhatsAppEvent.RINGING
+    if (callType == CallStyle.CALL_TYPE_INCOMING ||
+        (callType == CallStyle.CALL_TYPE_SCREENING && hasAnswer)
+    ) return WhatsAppEvent.RINGING
     if (callType != CallStyle.CALL_TYPE_UNKNOWN || hasHangUp) return WhatsAppEvent.OTHER_CALL
     if (hasAnswer) return WhatsAppEvent.RINGING
     if (!callCategory && !callChannel) return WhatsAppEvent.MESSAGE

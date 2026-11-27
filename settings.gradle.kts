@@ -22,3 +22,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "RingPass"
 include(":app")
+
+if (providers.gradleProperty("ringpassTestFixtures").orNull == "true") {
+    include(":test-fixtures:whatsapp")
+}

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.content.ComponentName
 import android.media.AudioManager
@@ -17,8 +18,8 @@ import com.ringpass.app.data.contacts.DeviceContactEntry
 import com.ringpass.app.service.CustomRingtonePlayer
 import com.ringpass.app.service.ListenerDiagnostics
 import com.ringpass.app.service.SelectiveNotificationListener
+import com.ringpass.app.util.NotificationHelper
 import com.ringpass.app.util.RingtonePrefs
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,14 +30,17 @@ import com.ringpass.app.data.contacts.RecentUnknownCaller
 import com.ringpass.app.data.local.TrustedRule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -97,6 +101,8 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
     val globalRingtoneName: StateFlow<String?> = _globalRingtoneName.asStateFlow()
     private val ringtoneSaveLock = Mutex()
 
+    private val listenerComponent = ComponentName(app, SelectiveNotificationListener::class.java)
+    private var listenerProbeJob: Job? = null
     val listenerConnected: StateFlow<Boolean> = ListenerDiagnostics.isConnected
     val listenerLogs: StateFlow<List<String>> = ListenerDiagnostics.logs
 
@@ -145,7 +151,7 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
         val dndGranted = nm?.isNotificationPolicyAccessGranted == true
         if (dndGranted) app.dndController.cleanUpLegacyOverride()
         val roleHeld = roleManager?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true
-        val listenerEnabled = NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+        val listenerEnabled = nm?.isNotificationListenerAccessGranted(listenerComponent) == true
         val overlayGranted = Settings.canDrawOverlays(ctx)
         val contactsGranted = hasPerm(Manifest.permission.READ_CONTACTS)
         val callLogGranted = hasPerm(Manifest.permission.READ_CALL_LOG)
@@ -160,7 +166,7 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
         val alarmPercent = ((alarmVol * 100f) / alarmMax).toInt()
 
         if (listenerEnabled && !ListenerDiagnostics.isConnected.value) {
-            rebindNotificationListener(silent = true)
+            requestListenerRebind()
         }
 
         _permissions.value = PermissionStatusState(
@@ -179,14 +185,44 @@ class RingPassViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    fun rebindNotificationListener(silent: Boolean = false) {
-        try {
-            NotificationListenerService.requestRebind(
-                ComponentName(app, SelectiveNotificationListener::class.java)
-            )
-            if (!silent) _statusMessage.value = "Requested Android to bind Notification Listener."
-        } catch (_: Exception) {
-            if (!silent) _statusMessage.value = "Could not bind listener; toggle it off and on in Settings."
+    private fun requestListenerRebind() {
+        runCatching { NotificationListenerService.requestRebind(listenerComponent) }
+            .onFailure { ListenerDiagnostics.log("Android declined the listener reconnect request.") }
+    }
+
+    fun verifyNotificationListener() {
+        refreshPermissions()
+        if (!_permissions.value.notificationListenerGranted) {
+            _statusMessage.value = "Open Notification access and enable Allow notification access for RingPass."
+            return
+        }
+        if (listenerProbeJob?.isActive == true) return
+        listenerProbeJob = viewModelScope.launch {
+            if (!ListenerDiagnostics.isConnected.value) {
+                requestListenerRebind()
+                val bound = withTimeoutOrNull(3_000L) {
+                    ListenerDiagnostics.isConnected.first { it }
+                } == true
+                if (!bound) {
+                    _statusMessage.value = "Android has not connected the listener. Turn RingPass off and back on in Notification access."
+                    return@launch
+                }
+            }
+
+            val token = SystemClock.elapsedRealtimeNanos()
+            if (!NotificationHelper.postListenerProbe(app, token)) {
+                _statusMessage.value = "Allow RingPass notifications and its Listener verification notification category."
+                return@launch
+            }
+            try {
+                val received = withTimeoutOrNull(4_000L) {
+                    ListenerDiagnostics.probeReceived.first { it == token }
+                } != null
+                _statusMessage.value = if (received) "Android delivered an ongoing notification to RingPass."
+                else "Android connected the listener but did not deliver the test. Check ongoing notification access."
+            } finally {
+                app.getSystemService(NotificationManager::class.java)?.cancel(NotificationHelper.LISTENER_PROBE_ID)
+            }
         }
     }
 

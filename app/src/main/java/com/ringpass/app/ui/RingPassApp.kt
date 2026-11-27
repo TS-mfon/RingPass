@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.role.RoleManager
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -42,6 +43,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ringpass.app.service.SelectiveNotificationListener
 import com.ringpass.app.ui.components.MultiNumberContactDialog
 import com.ringpass.app.ui.components.BulkImportContactsDialog
 import com.ringpass.app.ui.screens.NotedNumbersScreen
@@ -266,9 +268,17 @@ fun RingPassApp(
                         }
                     },
                     onOpenNotificationListenerSettings = {
-                        context.startActivity(
-                            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                        )
+                        val listener = ComponentName(context, SelectiveNotificationListener::class.java)
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                                    .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, listener.flattenToString()))
+                            } else {
+                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            }
+                        } catch (_: ActivityNotFoundException) {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        }
                     },
                     onOpenOverlaySettings = {
                         context.startActivity(
@@ -287,7 +297,7 @@ fun RingPassApp(
                         )
                         context.startActivity(intent)
                     },
-                    onRebindListener = { viewModel.rebindNotificationListener(silent = false) },
+                    onVerifyListener = viewModel::verifyNotificationListener,
                     onTestBypassSound = viewModel::testBypassSound,
                     onPickGlobalRingtone = { pickRingtone(-1L) },
                     onClearGlobalRingtone = { viewModel.setGlobalRingtone(null) },

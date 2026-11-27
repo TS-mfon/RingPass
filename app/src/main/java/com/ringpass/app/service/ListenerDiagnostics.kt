@@ -14,6 +14,14 @@ object ListenerDiagnostics {
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs.asStateFlow()
 
+    private val _probeReceived = MutableStateFlow(0L)
+    val probeReceived: StateFlow<Long> = _probeReceived.asStateFlow()
+
+    fun onProbeReceived(token: Long) {
+        _probeReceived.value = token
+        log("Android delivered the notification listener test.")
+    }
+
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
     fun setConnected(connected: Boolean) {

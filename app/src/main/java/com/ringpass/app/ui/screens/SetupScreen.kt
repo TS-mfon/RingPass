@@ -54,7 +54,7 @@ fun SetupScreen(
     onRequestRuntimePermissions: () -> Unit,
     onRequestBatteryOptimizationExemption: () -> Unit,
     onOpenAppDetailsSettings: () -> Unit,
-    onRebindListener: () -> Unit,
+    onVerifyListener: () -> Unit,
     onTestBypassSound: () -> Unit,
     onPickGlobalRingtone: () -> Unit,
     onClearGlobalRingtone: () -> Unit,
@@ -165,7 +165,11 @@ fun SetupScreen(
                         Icon(Icons.Rounded.NotificationsActive, contentDescription = null, tint = if (listenerConnected) Color(0xFF5EEAD4) else Color(0xFFFCD34D))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (listenerConnected) "WhatsApp / Message Listener: CONNECTED" else "WhatsApp / Message Listener: NOT BOUND",
+                            text = when {
+                                listenerConnected -> "WhatsApp listener connected"
+                                status.notificationListenerGranted -> "Notification access granted. Listener disconnected."
+                                else -> "Notification access is off"
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = if (listenerConnected) Color(0xFF5EEAD4) else Color(0xFFFCD34D)
@@ -180,7 +184,11 @@ fun SetupScreen(
                     if (!listenerConnected) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Sideloaded APK tip: If Notification Access is greyed out or not bound, tap Open RingPass App Info -> top-right 3 dots -> Allow restricted settings, then re-enable Notification Listener Access.",
+                            text = if (status.notificationListenerGranted) {
+                                "Open Notification access, switch RingPass off and back on, and accept the confirmation."
+                            } else {
+                                "Enable Allow notification access for RingPass. If Android blocks the switch, open RingPass App Info and choose Allow restricted settings from the menu first."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.tertiary
                         )
@@ -192,8 +200,12 @@ fun SetupScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Test Sound")
                         }
-                        if (status.notificationListenerGranted && !listenerConnected) {
-                            FilledTonalButton(onClick = onRebindListener) { Text("Rebind Listener") }
+                        FilledTonalButton(onClick = onVerifyListener) { Text("Test Listener") }
+                    }
+                    if (!listenerConnected) {
+                        TextButton(onClick = onOpenNotificationListenerSettings) { Text("Open Notification Access") }
+                        if (!status.notificationListenerGranted) {
+                            TextButton(onClick = onOpenAppDetailsSettings) { Text("Open RingPass App Info") }
                         }
                     }
                     if (listenerLogs.isNotEmpty()) {

@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -17,6 +18,10 @@ import com.ringpass.app.QuickNoteActivity
 object NotificationHelper {
     const val CHANNEL_OVERLAY_SERVICE = "ringpass_overlay_service"
     const val CHANNEL_POST_CALL_NOTE = "ringpass_post_call_note"
+
+    private const val CHANNEL_LISTENER_TEST = "ringpass_listener_test"
+    const val LISTENER_PROBE_ID = 3002
+    const val EXTRA_LISTENER_PROBE = "com.ringpass.app.LISTENER_PROBE"
 
     const val EXTRA_NUMBER = "extra_number"
 
@@ -42,6 +47,35 @@ object NotificationHelper {
 
         manager.createNotificationChannel(overlayChannel)
         manager.createNotificationChannel(postCallChannel)
+    }
+
+    fun postListenerProbe(context: Context, token: Long): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (!manager.areNotificationsEnabled()) return false
+        val channel = NotificationChannel(
+            CHANNEL_LISTENER_TEST, "Listener verification", NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            setShowBadge(false)
+            setSound(null, null)
+        }
+        return try {
+            manager.createNotificationChannel(channel)
+            if (manager.getNotificationChannel(CHANNEL_LISTENER_TEST)?.importance == NotificationManager.IMPORTANCE_NONE) {
+                return false
+            }
+            val notification = Notification.Builder(context, CHANNEL_LISTENER_TEST)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Checking RingPass notification access")
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setOngoing(true)
+                .setTimeoutAfter(5_000L)
+                .addExtras(Bundle().apply { putLong(EXTRA_LISTENER_PROBE, token) })
+                .build()
+            manager.notify(LISTENER_PROBE_ID, notification)
+            true
+        } catch (_: SecurityException) {
+            false
+        }
     }
 
     fun buildOverlayServiceNotification(context: Context, number: String): Notification {

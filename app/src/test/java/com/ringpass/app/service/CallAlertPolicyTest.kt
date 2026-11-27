@@ -7,7 +7,8 @@ class CallAlertPolicyTest {
     @Test fun `CallStyle incoming uses type before fallback text and actions`() {
         assertEquals(WhatsAppEvent.RINGING, whatsAppEvent(callType = 1, text = "Appel vidéo"))
         assertEquals(WhatsAppEvent.OTHER_CALL, whatsAppEvent(callType = 2, hasAnswer = true))
-        assertEquals(WhatsAppEvent.OTHER_CALL, whatsAppEvent(callType = 3, hasAnswer = true))
+        assertEquals(WhatsAppEvent.RINGING, whatsAppEvent(callType = 3, hasAnswer = true, hasHangUp = true))
+        assertEquals(WhatsAppEvent.OTHER_CALL, whatsAppEvent(callType = 3, hasHangUp = true))
     }
 
     @Test fun `legacy WhatsApp voice and video calls are identified by call metadata`() {
